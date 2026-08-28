@@ -15,5 +15,7 @@ public enum AuditAction
     InviteUsed,
     InviteExpired,
     InviteBulkGranted, // admin atribuiu convite multi-uso
-    AdminLogin
+    AdminLogin,
+    TotpEnabled,
+    TotpDisabled
 }

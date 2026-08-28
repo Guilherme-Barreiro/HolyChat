@@ -24,6 +24,7 @@ builder.Services.AddDbContext<HolyChatDbContext>(options =>
 builder.Services.AddHttpClient<IMatrixAuthService, MatrixAuthService>();
 builder.Services.AddHttpClient<ISynapseAdminService, SynapseAdminService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<ITotpService, TotpService>();
 
 // JWT Bearer authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"]

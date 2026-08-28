@@ -32,6 +32,18 @@ public class User
     public UserStatus Status { get; set; } = UserStatus.PendingApproval;
 
     /// <summary>
+    /// Secret TOTP (Base32), null se 2FA nunca foi configurado ou foi desativado.
+    /// </summary>
+    [MaxLength(64)]
+    public string? TotpSecret { get; set; }
+
+    /// <summary>
+    /// Só true depois de o utilizador confirmar um código válido no setup.
+    /// Um TotpSecret preenchido com TotpEnabled=false é um setup pendente.
+    /// </summary>
+    public bool TotpEnabled { get; set; } = false;
+
+    /// <summary>
     /// FK recursiva - quem convidou este utilizador. Null para os admins fundadores.
     /// </summary>
     public Guid? InvitedById { get; set; }

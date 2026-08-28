@@ -5,6 +5,7 @@ using HolyChat.Api.Models;
 using HolyChat.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 
 namespace HolyChat.Api.Controllers;
 
@@ -16,6 +17,7 @@ public class AuthController : ControllerBase
     private readonly IMatrixAuthService _matrixAuth;
     private readonly ISynapseAdminService _synapseAdmin;
     private readonly IJwtService _jwtService;
+    private readonly ITotpService _totpService;
     private readonly ILogger<AuthController> _logger;
 
     // Regras de nome de utilizador Matrix (localpart): minúsculas,
@@ -28,12 +30,14 @@ public class AuthController : ControllerBase
         IMatrixAuthService matrixAuth,
         ISynapseAdminService synapseAdmin,
         IJwtService jwtService,
+        ITotpService totpService,
         ILogger<AuthController> logger)
     {
         _db = db;
         _matrixAuth = matrixAuth;
         _synapseAdmin = synapseAdmin;
         _jwtService = jwtService;
+        _totpService = totpService;
         _logger = logger;
     }
 
@@ -68,6 +72,20 @@ public class AuthController : ControllerBase
         if (user.Status != UserStatus.Active)
         {
             return Unauthorized(new { error = $"Account status is '{user.Status}'. Access denied." });
+        }
+
+        // 3.5. Se o utilizador tiver 2FA ativo, exige e valida o código TOTP.
+        if (user.TotpEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(request.TotpCode))
+            {
+                return Unauthorized(new { error = "totp_required", message = "This account has 2FA enabled. Provide totpCode." });
+            }
+
+            if (user.TotpSecret is null || !_totpService.VerifyCode(user.TotpSecret, request.TotpCode))
+            {
+                return Unauthorized(new { error = "invalid_totp_code" });
+            }
         }
 
         // 4. Emite o JWT próprio do backend.
@@ -201,5 +219,111 @@ public class AuthController : ControllerBase
             Role = user.Role.ToString(),
             ExpiresAt = expiresAt
         });
+    }
+
+    [HttpPost("totp/setup")]
+    [Authorize]
+    public async Task<ActionResult<TotpSetupResponse>> TotpSetup()
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null) return Unauthorized();
+
+        var user = await _db.Users.FindAsync(userId.Value);
+        if (user is null) return NotFound();
+
+        if (user.TotpEnabled)
+        {
+            return BadRequest(new { error = "2FA is already enabled. Disable it first to set up a new secret." });
+        }
+
+        // Gera um novo secret e guarda como "pendente" (TotpEnabled continua false
+        // até ser confirmado com um código válido em /totp/enable).
+        var secret = _totpService.GenerateSecret();
+        user.TotpSecret = secret;
+        await _db.SaveChangesAsync();
+
+        return Ok(new TotpSetupResponse
+        {
+            Secret = secret,
+            OtpauthUri = _totpService.GetOtpauthUri(secret, user.Username)
+        });
+    }
+
+    [HttpPost("totp/enable")]
+    [Authorize]
+    public async Task<IActionResult> TotpEnable([FromBody] TotpCodeRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null) return Unauthorized();
+
+        var user = await _db.Users.FindAsync(userId.Value);
+        if (user is null) return NotFound();
+
+        if (user.TotpSecret is null)
+        {
+            return BadRequest(new { error = "No pending 2FA setup. Call /totp/setup first." });
+        }
+
+        if (!_totpService.VerifyCode(user.TotpSecret, request.Code))
+        {
+            return BadRequest(new { error = "Invalid code." });
+        }
+
+        user.TotpEnabled = true;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = user.Id,
+            Action = AuditAction.TotpEnabled,
+            TargetId = user.Id
+        });
+
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("totp/disable")]
+    [Authorize]
+    public async Task<IActionResult> TotpDisable([FromBody] TotpCodeRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null) return Unauthorized();
+
+        var user = await _db.Users.FindAsync(userId.Value);
+        if (user is null) return NotFound();
+
+        if (!user.TotpEnabled || user.TotpSecret is null)
+        {
+            return BadRequest(new { error = "2FA is not enabled." });
+        }
+
+        // Exige um código válido para desativar - evita que alguém com
+        // acesso momentâneo à sessão (mas sem a app authenticator) desative
+        // o 2FA de outra pessoa.
+        if (!_totpService.VerifyCode(user.TotpSecret, request.Code))
+        {
+            return BadRequest(new { error = "Invalid code." });
+        }
+
+        user.TotpEnabled = false;
+        user.TotpSecret = null;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = user.Id,
+            Action = AuditAction.TotpDisabled,
+            TargetId = user.Id
+        });
+
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        var subClaim = User.FindFirst("sub")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        return Guid.TryParse(subClaim, out var id) ? id : null;
     }
 }
