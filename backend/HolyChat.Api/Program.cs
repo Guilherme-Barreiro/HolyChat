@@ -22,6 +22,7 @@ builder.Services.AddDbContext<HolyChatDbContext>(options =>
 
 // Serviços de auth
 builder.Services.AddHttpClient<IMatrixAuthService, MatrixAuthService>();
+builder.Services.AddHttpClient<ISynapseAdminService, SynapseAdminService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 
 // JWT Bearer authentication
