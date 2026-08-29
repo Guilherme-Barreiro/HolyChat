@@ -41,8 +41,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() => _totpRequired = true);
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);
-    } catch (e) {
-      setState(() => _errorMessage = 'Something went wrong. Try again.');
+    } catch (e, stack) {
+      // ignore: avoid_print
+      print('LOGIN ERROR: $e');
+      // ignore: avoid_print
+      print('STACK: $stack');
+      setState(() => _errorMessage = 'Something went wrong: $e');
     }
   }
 

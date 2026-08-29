@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/auth_user.dart';
 import '../services/api_service.dart';
 import '../services/secure_storage_service.dart';
+import 'matrix_provider.dart';
 
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
@@ -43,13 +44,29 @@ class AuthNotifier extends Notifier<AuthState> {
     try {
       final api = ref.read(apiServiceProvider);
       final storage = ref.read(secureStorageProvider);
+      final matrix = ref.read(matrixServiceProvider);
 
+      // 1. Autentica no backend HolyChat (JWT).
       final result = await api.login(
         username: username,
         password: password,
         totpCode: totpCode,
       );
       await storage.saveToken(result.token);
+
+      // 2. Autentica também no Matrix, com as mesmas credenciais -
+      // uma password só, como decidido. Se já houver uma sessão
+      // Matrix persistida localmente MAS de outro utilizador (ex:
+      // trocaste de conta no mesmo dispositivo/emulador), termina-a
+      // primeiro antes de autenticar a conta certa.
+      await matrix.init();
+      if (matrix.isLoggedIn && !matrix.isLoggedInAs(username)) {
+        await matrix.logout();
+      }
+      if (!matrix.isLoggedIn) {
+        await matrix.login(username, password);
+      }
+
       state = AuthState(user: result.user, token: result.token, isLoading: false);
     } catch (e) {
       state = state.copyWith(isLoading: false);
@@ -59,7 +76,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> logout() async {
     final storage = ref.read(secureStorageProvider);
+    final matrix = ref.read(matrixServiceProvider);
     await storage.deleteToken();
+    await matrix.logout();
     state = const AuthState();
   }
 }

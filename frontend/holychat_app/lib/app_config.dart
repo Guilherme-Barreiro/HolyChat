@@ -12,6 +12,10 @@
 /// Mais tarde, quando o backend estiver publicado (ex: api.holychat.cc
 /// via Cloudflare Tunnel), troca para essa URL de produção.
 class AppConfig {
-  //static const String apiBaseUrl = 'http://10.0.2.2:5175';
-  static const String apiBaseUrl = 'http://localhost:5175';
+  static const String apiBaseUrl = 'http://10.0.2.2:5175';
+
+  /// URL pública do Synapse - já está em produção via Cloudflare
+  /// Tunnel, por isso é a mesma em qualquer ambiente de teste
+  /// (ao contrário da apiBaseUrl, que muda consoante o dispositivo).
+  static const String matrixHomeserverUrl = 'https://matrix.holychat.cc';
 }

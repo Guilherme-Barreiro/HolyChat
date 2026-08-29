@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
+import '../providers/matrix_provider.dart';
 
 /// Ecrã placeholder - confirma visualmente que o login funcionou.
 /// Vai ser substituído pelo ecrã de conversas (issue #13).
@@ -29,6 +30,12 @@ class HomeScreen extends ConsumerWidget {
             Text('Username: ${user.username}'),
             Text('Role: ${user.role}'),
             Text('Session expires: ${user.expiresAt}'),
+    Consumer(
+              builder: (context, ref, _) {
+                final matrix = ref.read(matrixServiceProvider);
+                return Text('Matrix: ${matrix.isLoggedIn} (${matrix.client.userID})');
+              },
+            ),
           ],
         ),
       ),
