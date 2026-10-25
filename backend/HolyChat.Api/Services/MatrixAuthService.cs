@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -5,10 +6,6 @@ namespace HolyChat.Api.Services;
 
 public interface IMatrixAuthService
 {
-    /// <summary>
-    /// Tenta autenticar contra o Synapse. Devolve true se as credenciais
-    /// forem válidas (o Synapse aceitou o login), false caso contrário.
-    /// </summary>
     Task<bool> ValidateCredentialsAsync(string username, string password);
 }
 
@@ -27,38 +24,63 @@ public class MatrixAuthService : IMatrixAuthService
 
     public async Task<bool> ValidateCredentialsAsync(string username, string password)
     {
-        var synapseBaseUrl = _configuration["Synapse:BaseUrl"]
+        var baseUrl = _configuration["Synapse:BaseUrl"]?.TrimEnd('/')
             ?? throw new InvalidOperationException("Synapse:BaseUrl not configured");
 
         var payload = new
         {
             type = "m.login.password",
-            identifier = new
-            {
-                type = "m.id.user",
-                user = username
-            },
-            password = password
+            identifier = new { type = "m.id.user", user = username },
+            password
         };
-
-        var json = JsonSerializer.Serialize(payload);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsync(
-                $"{synapseBaseUrl}/_matrix/client/v3/login",
-                content);
+            using var content = new StringContent(
+                JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync(
+                $"{baseUrl}/_matrix/client/v3/login", content);
 
-            // 200 OK = Synapse aceitou as credenciais.
-            // 403 = username/password errados. Qualquer outro erro
-            // (rede, Synapse em baixo) também deve resultar em falha de login,
-            // nunca em bypass.
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            // A Matrix password login creates a Matrix access token/device.
+            // Revoke this temporary session: HolyChat.Api only verifies the
+            // password and the Flutter client manages its own Matrix session.
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (!json.RootElement.TryGetProperty("access_token", out var tokenElement)
+                || string.IsNullOrWhiteSpace(tokenElement.GetString()))
+            {
+                _logger.LogError("Matrix login returned no access token for {Username}", username);
+                return false;
+            }
+
+            using var revokeRequest = new HttpRequestMessage(
+                HttpMethod.Post, $"{baseUrl}/_matrix/client/v3/logout");
+            revokeRequest.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", tokenElement.GetString());
+            using var revokeResponse = await _httpClient.SendAsync(revokeRequest);
+            if (!revokeResponse.IsSuccessStatusCode)
+            {
+                _logger.LogError("Could not revoke the temporary Matrix session for {Username}", username);
+                return false;
+            }
+
+            return true;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Failed to reach Synapse for login validation");
+            _logger.LogError(ex, "Matrix login verification failed");
+            return false;
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Matrix login verification timed out");
+            return false;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Synapse returned an invalid login response");
             return false;
         }
     }
