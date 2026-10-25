@@ -37,3 +37,9 @@ Backup paths will be printed during install. Restore the **configuration files**
 - Registration can leave an orphaned Matrix account if the SQL transaction fails.
 - The scripts are for the observed two-service layout, not general-purpose installers.
 - The real production validation, encrypted messaging tests and backup restoration test remain to be done.
+
+## Automated validation
+
+Pull requests run the `HolyChat deployment checks` GitHub Actions workflow, which checks shell syntax, compiles Python renderers, executes synthetic renderer tests, and validates the Nginx configuration. These checks do **not** substitute for testing against the live Docker layout or a restored PostgreSQL backup.
+
+If installation fails after the proxy is started, the rollback handler stops and removes the proxy **before** recreating the original Synapse container on port 8008. It then checks the local Matrix client endpoint. Backup files are kept unchanged.

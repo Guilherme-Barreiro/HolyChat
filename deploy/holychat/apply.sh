@@ -39,10 +39,38 @@ sha256sum "$backup/postgres.sql.gz" "$backup/synapse-data.tar.gz" > "$backup/SHA
 echo "Backup: $backup"
 changed=0
 restore() {
-  echo "Falha! A repor a configuracao original (nao restaura nem altera dados de mensagens)" >&2
-  cp -p "$backup/docker-compose.yml" "$COMPOSE"
-  cp -p "$backup/homeserver.yaml" "$HOME_YAML"
-  docker compose -f "$COMPOSE" up -d --no-deps --pull never --force-recreate synapse || true
+  # The new proxy owns host port 8008. Stop and remove it BEFORE
+  # restoring the original Compose, otherwise the old Synapse fails
+  # to bind the port and rollback silently leaves Matrix unavailable.
+  trap - ERR
+  local failed=0
+  echo "Falha durante a actualizacao. A repor a configuracao anterior..." >&2
+  docker compose -f "$COMPOSE" rm -f -s holychat-proxy || failed=1
+  cp -p "$backup/docker-compose.yml" "$COMPOSE" || failed=1
+  cp -p "$backup/homeserver.yaml" "$HOME_YAML" || failed=1
+  if [[ "$failed" == 0 ]]; then
+    docker compose -f "$COMPOSE" up -d --no-deps --pull never --force-recreate synapse || failed=1
+  fi
+  if [[ "$failed" == 0 ]]; then
+    local available=0
+    for i in $(seq 1 60); do
+      if curl --max-time 5 -fsS -o /dev/null http://127.0.0.1:8008/_matrix/client/versions; then
+        available=1
+        break
+      fi
+      sleep 2
+    done
+    [[ "$available" == 1 ]] || failed=1
+  fi
+  if [[ "$failed" == 0 ]]; then
+    rm -f "$BASE/proxy/default.conf"
+    rmdir "$BASE/proxy" 2>/dev/null || true
+    echo "Configuracao reposta; Synapse voltou a responder na porta 8008." >&2
+  else
+    echo "ATENCAO: a reversao automatica nao ficou validada!" >&2
+    echo "Verificar o backup em: $backup" >&2
+    echo "Nao restaurar a base de dados sobre uma instancia em funcionamento." >&2
+  fi
 }
 trap 'if [[ "$changed" == 1 ]]; then restore; fi' ERR
 mkdir -p "$BASE/proxy"
