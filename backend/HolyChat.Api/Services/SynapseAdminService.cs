@@ -38,8 +38,18 @@ public sealed class SynapseAdminService : ISynapseAdminService
 
     public async Task CreateUserAsync(string username, string password, string displayName)
     {
-        var baseUrl = _configuration["Synapse:BaseUrl"]?.TrimEnd('/')
-            ?? throw new InvalidOperationException("Synapse:BaseUrl not configured");
+        // Administrative registration must NEVER be routed through the
+        // public Matrix endpoint (matrix.holychat.cc). Use an SSH port
+        // forward in development or the Synapse Docker service in production.
+        var configuredAdminUrl = _configuration["Synapse:AdminBaseUrl"];
+        if (!Uri.TryCreate(configuredAdminUrl, UriKind.Absolute, out var adminUri)
+            || (adminUri.Scheme != Uri.UriSchemeHttp && adminUri.Scheme != Uri.UriSchemeHttps)
+            || (!adminUri.IsLoopback && !string.Equals(adminUri.Host, "synapse", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SynapseAdminException(
+                "Synapse:AdminBaseUrl must be a private loopback URL or the 'synapse' Docker service");
+        }
+        var baseUrl = adminUri.ToString().TrimEnd('/');
         var sharedSecret = _configuration["Synapse:RegistrationSharedSecret"];
         if (string.IsNullOrWhiteSpace(sharedSecret))
         {
