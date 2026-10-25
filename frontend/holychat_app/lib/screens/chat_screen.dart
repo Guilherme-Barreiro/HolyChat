@@ -67,9 +67,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _sending) return;
 
     setState(() => _sending = true);
-    _messageController.clear();
     try {
       await widget.room.sendTextEvent(text);
+      if (mounted && _messageController.text.trim() == text) {
+        _messageController.clear();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

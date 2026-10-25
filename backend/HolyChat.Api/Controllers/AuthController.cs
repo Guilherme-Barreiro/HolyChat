@@ -163,6 +163,10 @@ public class AuthController : ControllerBase
         {
             await _synapseAdmin.CreateUserAsync(username, request.Password, request.DisplayName);
         }
+        catch (SynapseUserAlreadyExistsException)
+        {
+            return Conflict(new { error = "This username is already taken." });
+        }
         catch (SynapseAdminException ex)
         {
             _logger.LogError(ex, "Failed to create Matrix account for {Username}", username);
